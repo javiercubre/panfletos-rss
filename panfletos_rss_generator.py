@@ -45,6 +45,7 @@ PROGRAM_LANGUAGE = "pt"
 CHANNEL = "Antena1"
 
 BASE_URL = "https://www.rtp.pt"
+FEED_SELF_URL = "https://javiercubre.github.io/panfletos-rss/panfletos.xml"
 
 # Month name mapping (Portuguese)
 PT_MONTHS = {
@@ -91,6 +92,26 @@ def format_itunes_duration(seconds: int) -> str:
     if h > 0:
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
+
+
+def extract_audio_url(episode_url: str) -> str | None:
+    """Extract the direct audio stream URL from an RTP Play episode using yt-dlp."""
+    import yt_dlp
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "format": "best",
+        "skip_download": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(episode_url, download=False)
+            if info and info.get("url"):
+                return info["url"]
+    except Exception as e:
+        print(f"  yt-dlp failed for {episode_url}: {e}")
+    return None
 
 
 def scrape_episodes_from_html(html_content: str) -> list:
@@ -157,6 +178,16 @@ def fetch_episodes_online() -> list:
 
     episodes = scrape_episodes_from_html(resp.text)
     print(f"Found {len(episodes)} episodes")
+
+    # Extract audio URLs for each episode
+    for i, ep in enumerate(episodes):
+        print(f"  Extracting audio URL [{i+1}/{len(episodes)}]: {ep['title']}")
+        ep["audio_url"] = extract_audio_url(ep["url"])
+        if ep["audio_url"]:
+            print(f"    OK")
+        else:
+            print(f"    No audio URL found")
+
     return episodes
 
 
@@ -187,9 +218,11 @@ def generate_rss(episodes: list) -> str:
     lines.append(f'    <copyright>© RTP - Rádio e Televisão de Portugal</copyright>')
     lines.append(f'    <lastBuildDate>{format_rfc822(now)}</lastBuildDate>')
     lines.append(f'    <generator>Panfletos RSS Generator</generator>')
+    lines.append(f'    <atom:link href="{FEED_SELF_URL}" rel="self" type="application/rss+xml"/>')
     lines.append(f'    <itunes:author>{xml_escape(PROGRAM_AUTHOR)}</itunes:author>')
     lines.append(f'    <itunes:summary>{xml_escape(PROGRAM_DESCRIPTION)}</itunes:summary>')
-    lines.append(f'    <itunes:explicit>no</itunes:explicit>')
+    lines.append(f'    <itunes:type>episodic</itunes:type>')
+    lines.append(f'    <itunes:explicit>false</itunes:explicit>')
     lines.append(f'    <itunes:owner>')
     lines.append(f'      <itunes:name>{xml_escape(PROGRAM_AUTHOR)}</itunes:name>')
     lines.append(f'    </itunes:owner>')
@@ -205,9 +238,12 @@ def generate_rss(episodes: list) -> str:
         lines.append('    <item>')
         lines.append(f'      <title>{xml_escape(ep["title"])}</title>')
         lines.append(f'      <link>{ep["url"]}</link>')
-        lines.append(f'      <guid isPermaLink="true">{ep["url"]}</guid>')
+        lines.append(f'      <guid isPermaLink="false">rtp-panfletos-e{ep["episode_id"]}</guid>')
         lines.append(f'      <pubDate>{format_rfc822(ep["date"])}</pubDate>')
         lines.append(f'      <description>{xml_escape(ep["title"])} - {xml_escape(PROGRAM_TITLE)} com {xml_escape(PROGRAM_AUTHOR)} na {CHANNEL}.</description>')
+        audio_url = ep.get("audio_url")
+        if audio_url:
+            lines.append(f'      <enclosure url="{xml_escape(audio_url)}" length="0" type="audio/mpeg"/>')
         if ep["duration"] > 0:
             lines.append(f'      <itunes:duration>{format_itunes_duration(ep["duration"])}</itunes:duration>')
         lines.append(f'      <itunes:author>{xml_escape(PROGRAM_AUTHOR)}</itunes:author>')
